@@ -1,0 +1,113 @@
+const AWS = require('aws-sdk');
+const fs = require('fs');
+const csv = require('csv-parser');
+
+// Passo 1: Selecionar Dataset
+const datasetPath = 'caminho/para/estoque.csv';
+fs.createReadStream(datasetPath)
+  .pipe(csv())
+  .on('data', (row) => {
+    console.log(row);
+  })
+  .on('end', () => {
+    console.log('CSV file successfully processed');
+  });
+
+// Passo 2: Construir e Treinar
+const sagemaker = new AWS.SageMaker({ region: 'us-east-1' });
+
+const inputDataConfig = [
+  {
+    ChannelName: 'train',
+    DataSource: {
+      S3DataSource: {
+        S3DataType: 'S3Prefix',
+        S3Uri: 's3://meu-bucket/estoque.csv',
+        S3DataDistributionType: 'FullyReplicated'
+      }
+    },
+    ContentType: 'text/csv',
+    CompressionType: 'None'
+  }
+];
+
+const outputDataConfig = {
+  S3OutputPath: 's3://meu-bucket/output/'
+};
+
+const trainingParams = {
+  TrainingJobName: 'treinamento-estoque',
+  AlgorithmSpecification: {
+    TrainingImage: 'imagem-do-algoritmo',
+    TrainingInputMode: 'File'
+  },
+  RoleArn: 'arn:aws:iam::seu-role',
+  InputDataConfig: inputDataConfig,
+  OutputDataConfig: outputDataConfig,
+  ResourceConfig: {
+    InstanceType: 'ml.m5.large',
+    InstanceCount: 1,
+    VolumeSizeInGB: 10
+  },
+  StoppingCondition: {
+    MaxRuntimeInSeconds: 86400
+  }
+};
+
+sagemaker.createTrainingJob(trainingParams, (err, data) => {
+  if (err) console.log(err, err.stack);
+  else console.log(data);
+});
+
+// Passo 3: Analisar
+const describeParams = {
+  TrainingJobName: 'treinamento-estoque'
+};
+
+sagemaker.describeTrainingJob(describeParams, (err, data) => {
+  if (err) console.log(err, err.stack);
+  else console.log(data.TrainingJobStatus);
+});
+
+// Passo 4: Prever
+const transformParams = {
+  TransformJobName: 'transformacao-estoque',
+  ModelName: 'modelo-estoque',
+  TransformInput: {
+    DataSource: {
+      S3DataSource: {
+        S3DataType: 'S3Prefix',
+        S3Uri: 's3://meu-bucket/estoque.csv'
+      }
+    },
+    ContentType: 'text/csv',
+    CompressionType: 'None'
+  },
+  TransformOutput: {
+    S3OutputPath: 's3://meu-bucket/output/'
+  },
+  TransformResources: {
+    InstanceType: 'ml.m5.large',
+    InstanceCount: 1
+  }
+};
+
+sagemaker.createTransformJob(transformParams, (err, data) => {
+  if (err) console.log(err, err.stack);
+  else console.log(data);
+});
+
+// Exportar os resultados
+const s3 = new AWS.S3();
+const params = {
+  Bucket: 'meu-bucket',
+  Key: 'output/result.csv'
+};
+
+s3.getObject(params, (err, data) => {
+  if (err) console.log(err, err.stack);
+  else {
+    const results = data.Body.toString('utf-8');
+    console.log(results);
+  }
+});
